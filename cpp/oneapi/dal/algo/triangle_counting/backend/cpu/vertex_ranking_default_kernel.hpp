@@ -26,17 +26,24 @@
 #include "oneapi/dal/algo/triangle_counting/backend/cpu/intersection_tc.hpp"
 #include "oneapi/dal/backend/primitives/intersection/intersection.hpp"
 
+#include <atomic>
+#include <chrono>
+#include <vector>
+
 namespace oneapi::dal::preview::triangle_counting::backend {
 
 template <typename Cpu>
-array<std::int64_t> triangle_counting_local(const dal::preview::detail::topology<std::int32_t>& t,
-                                            int64_t* triangles_local) {
+array<std::int64_t> triangle_counting_local(const dal::preview::detail::topology<std::int32_t>& t) {
     const auto vertex_count = t.get_vertex_count();
     std::int32_t average_degree = t.get_edge_count() / vertex_count;
     int thread_cnt = dal::detail::threader_get_max_threads();
 
-    dal::detail::threader_for(thread_cnt * vertex_count,
-                              thread_cnt * vertex_count,
+    auto triangles_local_array = array<std::atomic<std::int64_t>>::empty(vertex_count);
+    
+    auto triangles_local = triangles_local_array.get_mutable_data();
+
+    dal::detail::threader_for(vertex_count,
+                              vertex_count,
                               [&](std::int64_t u) {
                                   triangles_local[u] = 0;
                               });
@@ -61,11 +68,9 @@ array<std::int64_t> triangle_counting_local(const dal::preview::detail::topology
                         u_neighbors_ptr++;
                     }
                     if (w == *u_neighbors_ptr) {
-                        int thread_id = dal::detail::threader_get_current_thread_index();
-                        int64_t indx = (int64_t)thread_id * (int64_t)vertex_count;
-                        triangles_local[indx + u]++;
-                        triangles_local[indx + v]++;
-                        triangles_local[indx + w]++;
+                        triangles_local[u]++;
+                        triangles_local[v]++;
+                        triangles_local[w]++;
                     }
                 }
             }
@@ -90,18 +95,15 @@ array<std::int64_t> triangle_counting_local(const dal::preview::detail::topology
                                  new_v_degree++)
                                 ;
 
-                            int thread_id = dal::detail::threader_get_current_thread_index();
-                            int64_t indx = (int64_t)thread_id * (int64_t)vertex_count;
-
                             auto tc = intersection_local_tc<Cpu>{}(t.get_vertex_neighbors_begin(u),
                                                                    t.get_vertex_neighbors_begin(v),
                                                                    u_degree,
                                                                    new_v_degree,
-                                                                   triangles_local + indx,
+                                                                   triangles_local,
                                                                    vertex_count);
 
-                            triangles_local[indx + u] += tc;
-                            triangles_local[indx + v] += tc;
+                            triangles_local[u] += tc;
+                            triangles_local[v] += tc;
                         }
                     });
         });
@@ -116,13 +118,329 @@ array<std::int64_t> triangle_counting_local(const dal::preview::detail::topology
     });
 
     dal::detail::threader_for(vertex_count, vertex_count, [&](std::int64_t u) {
-        for (int j = 0; j < thread_cnt; j++) {
-            int64_t idx_glob = (int64_t)j * (int64_t)vertex_count;
-            triangles_ptr[u] += triangles_local[idx_glob + u];
-        }
+        triangles_ptr[u] = triangles_local[u];
     });
     return arr_triangles;
 }
+
+// template <typename Cpu>
+// array<std::int64_t> triangle_counting_local(const dal::preview::detail::topology<std::int32_t>& t) {
+//     const auto vertex_count = t.get_vertex_count();
+    
+//     // //ID_CHECK
+//     // std::vector<std::tuple<int,int,int>> ID_CHECK(vertex_count);
+
+//     auto arr_triangles = array<std::int64_t>::empty(vertex_count);
+//     int64_t* triangles_ptr = arr_triangles.get_mutable_data();
+
+//     std::int32_t average_degree = t.get_edge_count() / vertex_count;
+//     int thread_cnt = dal::detail::threader_get_max_threads();
+
+
+//     auto timer1_array = array<double>::full(thread_cnt, static_cast<double>(0.0));
+//     auto timer1 = timer1_array.get_mutable_data();
+//     auto timer2_array = array<double>::full(thread_cnt, static_cast<double>(0.0));
+//     auto timer2 = timer2_array.get_mutable_data();
+//     auto timer3_array = array<double>::full(thread_cnt, static_cast<double>(0.0));
+//     auto timer3 = timer3_array.get_mutable_data();
+//     auto timer4_array = array<double>::full(thread_cnt, static_cast<double>(0.0));
+//     auto timer4 = timer4_array.get_mutable_data();
+
+
+//     const std::int32_t average_degree_sparsity_boundary = 4;
+//     if (average_degree < average_degree_sparsity_boundary) {
+//         dal::detail::threader_for(vertex_count, vertex_count, [&](std::int32_t u) {
+//             triangles_ptr[u] = 0;
+//             const std::int32_t* u_begin = t.get_vertex_neighbors_begin(u);
+//             const std::int32_t* u_end = t.get_vertex_neighbors_end(u);
+//             for (auto v_ = u_begin; v_ != u_end;
+//                  ++v_) {
+//                 std::int32_t v = *v_;
+
+//                 auto u_neighbors_ptr = u_begin;
+//                 for (auto w_ = t.get_vertex_neighbors_begin(v); w_ != t.get_vertex_neighbors_end(v);
+//                      ++w_) {
+//                     std::int32_t w = *w_;
+//                     if (w > v) {
+//                         break;
+//                     }
+//                     while ((u_neighbors_ptr != u_end) && (*u_neighbors_ptr < w)) {
+//                         u_neighbors_ptr++;
+//                     }
+//                     if (w == *u_neighbors_ptr) {
+//                         triangles_ptr[u]++;
+//                     }
+//                 }
+//             }
+//         });
+//     }
+//     else { //average_degree >= average_degree_sparsity_boundary
+//         //constexpr std::int32_t N_batch = 65536;
+//         //std::int32_t batch_size = N_batch * thread_cnt;
+//         constexpr std::int32_t batch_size = 65536;
+//         std::int32_t triangles_storage_size = batch_size * thread_cnt;
+//         auto triangles_storage_array = array<std::int64_t>::full(triangles_storage_size, static_cast<std::int64_t>(0));
+//         auto triangles_storage = triangles_storage_array.get_mutable_data();
+
+//         for(int32_t batch = 0; batch < vertex_count; batch += batch_size)
+//         {
+//         int32_t elements = batch + batch_size > vertex_count ? vertex_count - batch : batch_size;
+//         dal::detail::threader_for_simple(elements, thread_cnt, [&](std::int32_t a) {
+//             int32_t u = a + batch;
+//             //auto current_u_storage = triangles_storage + a * thread_cnt;
+
+//             const std::int32_t* u_begin = t.get_vertex_neighbors_begin(u);
+//             const std::int32_t u_degree = t.get_vertex_degree(u);
+
+//             if (u_degree >= 2)
+//                 dal::detail::threader_for_int32ptr(
+//                     u_begin,
+//                     t.get_vertex_neighbors_end(u),
+//                     [&](const std::int32_t* v_) {                        
+//                         auto local_id = dal::detail::threader_get_current_thread_index();
+//                         std::int32_t v = *v_;
+                        
+//                         const std::int32_t* v_neighbors_begin = t.get_vertex_neighbors_begin(v);
+//                         const std::int32_t v_degree = t.get_vertex_degree(v);
+//                         std::int32_t new_v_degree;
+                        
+//                         auto start1 = std::chrono::high_resolution_clock::now();
+
+//                         for ( new_v_degree = 0; 
+//                               (new_v_degree < v_degree) && (v_neighbors_begin[new_v_degree] <= v);
+//                               new_v_degree++ ) {};
+
+//                         auto stop1 = std::chrono::high_resolution_clock::now();
+
+//                         auto current_id1 = dal::detail::threader_get_current_thread_index();
+//                         timer1[current_id1] += std::chrono::duration_cast<std::chrono::duration<double>>(stop1 - start1).count();
+
+//                         auto start2 = std::chrono::high_resolution_clock::now();
+
+//                         auto index = a + local_id * batch_size;
+//                         triangles_storage[index] += preview::backend::intersection<Cpu>( u_begin,
+//                                                                 v_neighbors_begin,
+//                                                                 u_degree,
+//                                                                 new_v_degree);
+                        
+//                         // current_u_storage[local_id] += preview::backend::intersection<Cpu>( u_begin,
+//                         //                                         v_neighbors_begin,
+//                         //                                         u_degree,
+//                         //                                         new_v_degree);
+
+//                         auto stop2 = std::chrono::high_resolution_clock::now();
+
+//                         auto current_id2 = dal::detail::threader_get_current_thread_index();
+//                         timer2[current_id2] += std::chrono::duration_cast<std::chrono::duration<double>>(stop2 - start2).count();
+
+//                     });
+
+//             // auto global_id_2 = dal::detail::threader_get_current_thread_index();
+//             // if(global_id_2 != global_id)
+//             // {
+//             //     throw std::runtime_error("Id was changed");
+//             // }
+            
+//             auto start3 = std::chrono::high_resolution_clock::now();
+
+//             triangles_ptr[u] = 0;
+//             for(auto i = a; i < triangles_storage_size; i+=batch_size)
+//             {
+//                 triangles_ptr[u] += triangles_storage[i];
+//                 triangles_storage[i] = 0;
+//             }
+//             // for(auto i = 0; i < thread_cnt; ++i)
+//             // {
+//             //     triangles_ptr[u] += current_u_storage[i];
+//             //     current_u_storage[i] = 0;
+//             // }
+
+//             auto stop3 = std::chrono::high_resolution_clock::now();
+//             auto current_id3 = dal::detail::threader_get_current_thread_index();
+//             timer3[current_id3] += std::chrono::duration_cast<std::chrono::duration<double>>(stop3 - start3).count();
+
+
+//             // auto global_id_3 = dal::detail::threader_get_current_thread_index();
+//             // ID_CHECK[u] = {global_id, global_id_2, global_id_3};
+//         });
+//         }
+//     }
+
+//     // for(int i = 0; i < vertex_count; ++i)
+//     // {
+//     //     std::cout << "id[" << i << "]:" << std::get<0>(ID_CHECK[i]) << "-" << std::get<1>(ID_CHECK[i]) << ":" << std::get<2>(ID_CHECK[i]) <<std::endl;
+//     // }
+
+//     // for(auto i = 0; i < thread_cnt; ++i)
+//     // {
+//     //     std::cout << std::endl;
+//     //     for(auto j = 0; j < thread_cnt; ++j)
+//     //     {
+//     //         std::cout << triangles_storage[i * thread_cnt + j] << ":" << std::flush;
+//     //     }
+//     //     std::cout << std::endl;
+//     // }
+
+
+//     for(int i = 0; i < thread_cnt; ++i)
+//     {
+//         std::cout << "timer1[" << i << "]:" << timer1[i] << std::endl;
+//         std::cout << "timer2[" << i << "]:" << timer2[i] << std::endl;
+//         std::cout << "timer3[" << i << "]:" << timer3[i] << std::endl;
+//     }
+
+//     return arr_triangles;
+
+
+//     // auto triangles = [&]( const std::int32_t* v_begin,
+//     //                       const std::int32_t* v_end,
+//     //                       const std::int32_t u, std::int64_t res ) -> std::int64_t 
+//     // {
+//     //     for (auto v_ptr = v_begin; v_ptr != v_end; ++v_ptr) 
+//     //     {
+//     //         std::int32_t v = *v_ptr;
+
+//     //         const auto v_neighbors_begin = t.get_vertex_neighbors_begin(v);
+//     //         const std::int32_t v_degree = t.get_vertex_degree(v);
+
+//     //         std::int32_t new_v_degree = 0;
+//     //         for ( new_v_degree = 0; (new_v_degree < v_degree) &&
+//     //               (v_neighbors_begin[new_v_degree] <= v );
+//     //               ++new_v_degree ) {}
+
+//     //         res += preview::backend::intersection<Cpu>( t.get_vertex_neighbors_begin(u),
+//     //                                                     v_neighbors_begin,
+//     //                                                     t.get_vertex_degree(u),
+//     //                                                     new_v_degree);
+//     //     }
+//     //     return res;
+//     // };
+
+//     // const auto vertex_count = t.get_vertex_count();
+//     // const int thread_cnt = dal::detail::threader_get_max_threads();
+//     // //const int threshold = thread_cnt >> 2;
+
+
+//     // auto timer1_array = array<double>::full(thread_cnt, static_cast<double>(0.0));
+//     // auto timer1 = timer1_array.get_mutable_data();
+//     // auto timer2_array = array<double>::full(thread_cnt, static_cast<double>(0.0));
+//     // auto timer2 = timer2_array.get_mutable_data();
+//     // auto timer3_array = array<double>::full(thread_cnt, static_cast<double>(0.0));
+//     // auto timer3 = timer3_array.get_mutable_data();
+//     // auto timer4_array = array<double>::full(thread_cnt, static_cast<double>(0.0));
+//     // auto timer4 = timer4_array.get_mutable_data();
+
+
+//     // auto arr_triangles = array<std::int64_t>::empty(vertex_count);
+
+//     // auto triangles_storage_array = array<std::int64_t>::full(thread_cnt * thread_cnt, static_cast<std::int64_t>(0));
+//     // auto triangles_storage = triangles_storage_array.get_mutable_data();
+
+//     // int64_t* const triangles_ptr = arr_triangles.get_mutable_data();
+//     // dal::detail::threader_for(vertex_count, thread_cnt, [&](std::int32_t u) 
+//     // {
+//     //     std::int32_t degree_u = t.get_vertex_degree(u);
+//     //     if(degree_u < 2)
+//     //     {
+//     //         triangles_ptr[u] = 0;
+//     //     }
+//     //     // else if(degree_u > thread_cnt >> 1)
+//     //     else
+//     //     {
+//     //         auto id = dal::detail::threader_get_current_thread_index();
+//     //         auto current_u_storage = triangles_storage + id * thread_cnt;
+//     //         auto u_begin = t.get_vertex_neighbors_begin(u);
+//     //         auto u_degree = t.get_vertex_degree(u);
+
+//     //         dal::detail::threader_for_int32ptr(u_begin,
+//     //                                            t.get_vertex_neighbors_end(u),
+//     //                                            [&](const std::int32_t* v_ptr)
+//     //             {
+//     //                 auto current_id = dal::detail::threader_get_current_thread_index();                    
+//     //                 auto start1 = std::chrono::high_resolution_clock::now();
+                    
+//     //                 std::int32_t v = *v_ptr;
+
+//     //                 const auto v_neighbors_begin = t.get_vertex_neighbors_begin(v);
+                    
+//     //                 const std::int32_t v_degree = t.get_vertex_degree(v);
+//     //                 std::int32_t new_v_degree = 0;
+//     //                 for ( new_v_degree = 0; (new_v_degree < v_degree) &&
+//     //                       (v_neighbors_begin[new_v_degree] <= v );
+//     //                       ++new_v_degree ) {}
+
+//     //                 current_u_storage[current_id] += preview::backend::intersection<Cpu>( u_begin,
+//     //                                                     v_neighbors_begin,
+//     //                                                     u_degree,
+//     //                                                     new_v_degree);
+                    
+//     //                 auto stop1 = std::chrono::high_resolution_clock::now();
+
+//     //                 timer1[current_id] += std::chrono::duration_cast<std::chrono::duration<double>>(stop1 - start1).count();
+//     //             }
+//     //         );
+
+//     //         auto start2 = std::chrono::high_resolution_clock::now();
+
+//     //         triangles_ptr[u] = 0;
+//     //         for(auto i = 0; i < thread_cnt; ++i)
+//     //         {
+//     //             triangles_ptr[u] += current_u_storage[i];
+//     //             current_u_storage[i] = 0;
+//     //         }
+
+//     //         auto stop2 = std::chrono::high_resolution_clock::now();
+//     //         timer2[id] += std::chrono::duration_cast<std::chrono::duration<double>>(stop2 - start2).count();
+
+//     //         // triangles_ptr[u] = oneapi::dal::detail::parallel_reduce_int32_int64_t(
+//     //         //     thread_cnt,
+//     //         //     static_cast<std::int64_t>(0),
+//     //         //     [&]( const std::int32_t i_begin,
+//     //         //          const std::int32_t i_end,
+//     //         //          std::int64_t res ) -> std::int64_t {
+//     //         //         for(auto i = i_begin; i < i_end; ++i)
+//     //         //         {
+//     //         //             res += current_u_storage[i];
+//     //         //             current_u_storage[i] = 0;
+//     //         //         }
+//     //         //         return res;
+//     //         //     },
+//     //         //     [&](std::int64_t x, std::int64_t y) -> std::int64_t {
+//     //         //         return x + y;
+//     //         //     });
+
+//     //         // triangles_ptr[u] = oneapi::dal::detail::parallel_reduce_int32ptr_int64_t_simple(
+//     //         //     t.get_vertex_neighbors_begin(u),
+//     //         //     t.get_vertex_neighbors_end(u),
+//     //         //     static_cast<std::int64_t>(0),
+//     //         //     triangles,
+//     //         //     [&](std::int64_t x, std::int64_t y) -> std::int64_t {
+//     //         //         return x + y;
+//     //         //     });
+//     //     }
+//     //     // else {
+//     //     //     auto id = dal::detail::threader_get_current_thread_index();
+//     //     //     auto start3 = std::chrono::high_resolution_clock::now();
+
+//     //     //     triangles_ptr[u] = triangles(t.get_vertex_neighbors_begin(u),
+//     //     //                                  t.get_vertex_neighbors_end(u),
+//     //     //                                  u,
+//     //     //                                  static_cast<std::int64_t>(0));
+            
+//     //     //     auto stop3 = std::chrono::high_resolution_clock::now();
+//     //     //     timer3[id] += std::chrono::duration_cast<std::chrono::duration<double>>(stop3 - start3).count();            
+//     //     // }
+//     // });
+
+//     // for(int i = 0; i < thread_cnt; ++i)
+//     // {
+//     //     std::cout << "timer1[" << i << "]:" << timer1[i] << std::endl;
+//     //     std::cout << "timer2[" << i << "]:" << timer2[i] << std::endl;
+//     //     std::cout << "timer3[" << i << "]:" << timer3[i] << std::endl;
+//     // }
+
+//     // return arr_triangles;
+// }
 
 template <typename Cpu>
 std::int64_t triangle_counting_global_scalar(

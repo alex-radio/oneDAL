@@ -53,8 +53,7 @@ struct triangle_counting<Float,
                          dal::preview::detail::topology<std::int32_t>,
                          automatic> {
     array<std::int64_t> operator()(const dal::detail::host_policy& ctx,
-                                   const dal::preview::detail::topology<std::int32_t>& t,
-                                   std::int64_t* triangles_local) const;
+                                   const dal::preview::detail::topology<std::int32_t>& t) const;
 };
 
 template <typename Float>
@@ -96,28 +95,10 @@ ONEDAL_EXPORT std::int64_t compute_global_triangles(const dal::detail::host_poli
 template <typename Allocator, typename Topology>
 struct triangle_counting_local {
     inline array<std::int64_t> operator()(const dal::detail::host_policy& ctx,
-                                          const Allocator& alloc,
                                           const Topology& t) {
-        const auto vertex_count = t.get_vertex_count();
-
-        std::int64_t thread_cnt = dal::detail::threader_get_max_threads();
-
-        using int64_allocator_type =
-            typename std::allocator_traits<Allocator>::template rebind_alloc<std::int64_t>;
-
-        int64_allocator_type int64_allocator(alloc);
-
-        int64_t* triangles_local =
-            oneapi::dal::preview::detail::allocate(int64_allocator,
-                                                   (int64_t)thread_cnt * (int64_t)vertex_count);
-
         auto arr_triangles =
-            triangle_counting<float, task::local, Topology, automatic>{}(ctx, t, triangles_local);
-
-        oneapi::dal::preview::detail::deallocate(int64_allocator,
-                                                 triangles_local,
-                                                 (int64_t)thread_cnt * (int64_t)vertex_count);
-
+            triangle_counting<float, task::local, Topology, automatic>{}(ctx, t);
+            
         return arr_triangles;
     }
 };
@@ -217,7 +198,7 @@ struct vertex_ranking_kernel_cpu<method::ordered_count, task::local, Allocator, 
         if (t.get_vertex_count() == 0) {
             return vertex_ranking_result<task::local>();
         }
-        auto local_triangles = triangle_counting_local<Allocator, Topology>()(ctx, alloc, t);
+        auto local_triangles = triangle_counting_local<Allocator, Topology>()(ctx, t);
 
         return vertex_ranking_result<task::local>().set_ranks(
             dal::detail::homogen_table_builder{}
@@ -240,7 +221,7 @@ struct vertex_ranking_kernel_cpu<method::ordered_count,
         if (vertex_count == 0) {
             return vertex_ranking_result<task::local_and_global>();
         }
-        auto local_triangles = triangle_counting_local<Allocator, Topology>()(ctx, alloc, t);
+        auto local_triangles = triangle_counting_local<Allocator, Topology>()(ctx, t);
 
         std::int64_t total_s = compute_global_triangles(ctx, local_triangles, vertex_count);
 

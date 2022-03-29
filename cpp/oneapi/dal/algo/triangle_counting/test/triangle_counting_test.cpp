@@ -273,6 +273,8 @@ public:
 
         int correct_local_triangle_count = 0;
         for (std::int64_t i = 0; i < vertex_count; i++) {
+            std::cout << "l:" << local_triangles_data[i] <<std::endl;
+            std::cout << "c:" << graph_data.local_triangles[i] <<std::endl;
             if (local_triangles_data[i] == graph_data.local_triangles[i]) {
                 correct_local_triangle_count++;
             }

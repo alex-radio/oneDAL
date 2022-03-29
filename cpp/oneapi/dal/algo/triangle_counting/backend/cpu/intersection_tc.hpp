@@ -19,6 +19,7 @@
 #include <immintrin.h>
 
 #include <daal/src/services/service_defines.h>
+#include <atomic>
 
 namespace oneapi::dal::preview::triangle_counting::backend {
 
@@ -28,7 +29,7 @@ struct intersection_local_tc {
                                                const std::int32_t* neigh_v,
                                                std::int32_t n_u,
                                                std::int32_t n_v,
-                                               std::int64_t* tc,
+                                               std::atomic<std::int64_t> *tc,
                                                std::int64_t tc_size) {
         std::int64_t total = 0;
         std::int32_t i_u = 0, i_v = 0;
@@ -36,9 +37,12 @@ struct intersection_local_tc {
             if ((neigh_u[i_u] > neigh_v[n_v - 1]) || (neigh_v[i_v] > neigh_u[n_u - 1])) {
                 return total;
             }
-            if (neigh_u[i_u] == neigh_v[i_v]) {
-                total++, tc[neigh_u[i_u]]++;
-                i_u++, i_v++;
+            if (neigh_u[i_u] == neigh_v[i_v]) 
+            {
+                total++;
+                tc[neigh_u[i_u]]++;
+                i_u++;
+                i_v++;
             }
             else if (neigh_u[i_u] < neigh_v[i_v])
                 i_u++;
@@ -74,7 +78,7 @@ struct intersection_local_tc<dal::backend::cpu_dispatch_avx512> {
                                                const std::int32_t* neigh_v,
                                                std::int32_t n_u,
                                                std::int32_t n_v,
-                                               std::int64_t* tc,
+                                               std::atomic<std::int64_t> *tc,
                                                std::int64_t tc_size) {
         std::int64_t total = 0;
         std::int32_t i_u = 0, i_v = 0;
@@ -408,8 +412,10 @@ struct intersection_local_tc<dal::backend::cpu_dispatch_avx512> {
                 return total;
             }
             if (neigh_u[i_u] == neigh_v[i_v]) {
-                total++, tc[neigh_u[i_u]]++;
-                i_u++, i_v++;
+                total++;
+                tc[neigh_u[i_u]]++;
+                i_u++;
+                i_v++;
             }
             else if (neigh_u[i_u] < neigh_v[i_v])
                 i_u++;
