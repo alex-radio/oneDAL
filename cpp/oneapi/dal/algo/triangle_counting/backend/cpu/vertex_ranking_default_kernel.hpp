@@ -84,27 +84,33 @@ array<std::int64_t> triangle_counting_local(const dal::preview::detail::topology
                     t.get_vertex_neighbors_end(u),
                     [&](const std::int32_t* v_) {
                         std::int32_t v = *v_;
-                        if (v <= u) {
-                            const std::int32_t u_degree = t.get_vertex_degree(u);
-                            const std::int32_t* v_neighbors_begin = t.get_vertex_neighbors_begin(v);
-                            const std::int32_t v_degree = t.get_vertex_degree(v);
-                            std::int32_t new_v_degree;
+                        // if(v <= u)
+                        // {
+                        const std::int32_t u_degree = t.get_vertex_degree(u);
+                        const std::int32_t* v_neighbors_begin = t.get_vertex_neighbors_begin(v);
+                        const std::int32_t v_degree = t.get_vertex_degree(v);
+                        std::int32_t new_v_degree;
 
-                            for (new_v_degree = 0; (new_v_degree < v_degree) &&
-                                                   (v_neighbors_begin[new_v_degree] <= v);
-                                 new_v_degree++)
-                                ;
+                        for (new_v_degree = 0; (new_v_degree < v_degree) &&
+                                               (v_neighbors_begin[new_v_degree] <= v);
+                             new_v_degree++)
+                            ;
 
-                            auto tc = intersection_local_tc<Cpu>{}(t.get_vertex_neighbors_begin(u),
-                                                                   t.get_vertex_neighbors_begin(v),
-                                                                   u_degree,
-                                                                   new_v_degree,
-                                                                   triangles_local,
-                                                                   vertex_count);
+                        auto tc = preview::backend::intersection<Cpu>(t.get_vertex_neighbors_begin(u),
+                                                               t.get_vertex_neighbors_begin(v),
+                                                               u_degree,
+                                                               new_v_degree);
 
-                            triangles_local[u] += tc;
-                            triangles_local[v] += tc;
-                        }
+                        // auto tc = intersection_local_tc<Cpu>{}(t.get_vertex_neighbors_begin(u),
+                        //                                        t.get_vertex_neighbors_begin(v),
+                        //                                        u_degree,
+                        //                                        new_v_degree,
+                        //                                        triangles_local,
+                        //                                        vertex_count);
+
+                        triangles_local[u] += tc;
+                        //triangles_local[v] += tc;
+                        //}
                     });
         });
     }

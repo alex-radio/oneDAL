@@ -186,6 +186,16 @@ struct intersection_local_tc<dal::backend::cpu_dispatch_avx512> {
                                    _mm512_kor(tmp_match14, tmp_match15)))); // combine all matches
             }
             total += _popcnt32_redef(_mm512_mask2int(match)); //count number of matches
+            
+            // unsigned int match_int = _cvtmask16_u32(match);
+            // for(int i = 0; i < 16; ++i)
+            // {
+            //     if(match_int & 1)
+            //     {
+            //         tc[neigh_u[i_u + i]]++;
+            //     }
+            //     match_int >>= 1;
+            // }
             __m512i src = _mm512_set1_epi64(0);
             __m512i one_const = _mm512_set1_epi64(1);
 
@@ -194,7 +204,7 @@ struct intersection_local_tc<dal::backend::cpu_dispatch_avx512> {
 
             __m256i v_u_hi = _mm512_maskz_extracti32x8_epi32(match_hi, v_u, 1);
             __m256i v_u_lo = _mm512_maskz_extracti32x8_epi32(match_lo, v_u, 0);
-
+            
             __m512i gt_hi = _mm512_mask_i32gather_epi64(src, match_hi, v_u_hi, tc, 8);
             __m512i sum_hi = _mm512_mask_add_epi64(src, match_hi, gt_hi, one_const);
             _mm512_mask_i32scatter_epi64(tc, match_hi, v_u_hi, sum_hi, 8);
@@ -294,6 +304,17 @@ struct intersection_local_tc<dal::backend::cpu_dispatch_avx512> {
                                _kor_mask8(tmp_match6, tmp_match7))); // combine all matches
             }
             total += _popcnt32_redef(_cvtmask8_u32(match)); //count number of matches
+            
+            // unsigned int match_int = _cvtmask8_u32(match);
+            // for(int i = 0; i < 8; ++i)
+            // {
+            //     if(match_int & 1)
+            //     {
+            //         tc[neigh_u[i_u + i]]++;
+            //     }
+            //     match_int >>= 1;
+            // }
+
             __m512i src = _mm512_set1_epi64(0);
             __m512i one_const = _mm512_set1_epi64(1);
 
@@ -373,9 +394,20 @@ struct intersection_local_tc<dal::backend::cpu_dispatch_avx512> {
                                    _kor_mask8(tmp_match2, tmp_match3)); // combine all matches
             }
             total += _popcnt32_redef(_cvtmask8_u32(match)); //count number of matches
+
+            // unsigned int match_int = _cvtmask8_u32(match);
+            // for(int i = 0; i < 4; ++i)
+            // {
+            //     if(match_int & 1)
+            //     {
+            //         tc[neigh_u[i_u + i]]++;
+            //     }
+            //     match_int >>= 1;
+            // }
+
             __m256i src = _mm256_setzero_si256();
             __m256i one_const = _mm256_set1_epi64x(1);
-
+            
             __m256i gt = _mm256_mmask_i32gather_epi64(src, match, v_u, tc, 8);
             __m256i sum = _mm256_mask_add_epi64(src, match, gt, one_const);
             _mm256_mask_i32scatter_epi64(tc, match, v_u, sum, 8);
